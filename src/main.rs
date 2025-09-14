@@ -1,5 +1,22 @@
-
 const N: usize = 9;
+
+struct Cell {
+    x: usize,
+    y: usize,
+}
+
+fn find_empty_cells(board: &[[u8; N]; N]) -> Vec<Cell> {
+    let mut cells = Vec::new();
+
+    for i in 0..N {
+        for j in 0..N {
+            if board[i][j] == 0 {
+                cells.push(Cell { x: i, y: j });
+            }
+        }
+    }
+    cells
+}
 
 fn main() {
     let board: [[u8; N]; N] = [
@@ -16,18 +33,11 @@ fn main() {
 
     let response = is_allowed(&board, 1, 4, 1);
     println!("{}", response);
-
 }
 
-fn is_in_a_section(
-    board : &[[u8; N]; N],
-    row: usize,
-    col: usize,
-    num: u8
-) -> bool {
-
+fn is_in_a_section(board: &[[u8; N]; N], row: usize, col: usize, num: u8) -> bool {
     let module_row = row % 3;
-    let module_column  = col % 3;
+    let module_column = col % 3;
 
     let start_row = row - module_row;
     let start_column = col - module_column;
@@ -42,14 +52,7 @@ fn is_in_a_section(
     false
 }
 
-fn is_allowed(
-    board : &[[u8; N]; N],
-    row: usize,
-    col: usize,
-    num: u8
-) -> bool {
-
-
+fn is_allowed(board: &[[u8; N]; N], row: usize, col: usize, num: u8) -> bool {
     for n in 0..N {
         println!("{}", board[n][col]);
         println!("{}", board[row][n]);
