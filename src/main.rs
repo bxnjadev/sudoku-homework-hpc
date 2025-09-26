@@ -1,17 +1,76 @@
+use std::collections::HashSet;
 use std::mem::needs_drop;
 
 const N: usize = 9;
 
-#[derive(Copy, Clone)]
+#[derive(Clone)]
+struct CellPossibilities {
+    x: usize,
+    y: usize,
+    possibles_values: HashSet<u8>,
+}
+
 struct Cell {
     x: usize,
     y: usize,
 }
 
+#[derive(Clone)]
 struct SudokuGameProperties {
     board: [[u8; N]; N],
-    cells_empty: Vec<Cell>,
-    current_index: usize,
+    cells_possibilities: Vec<CellPossibilities>,
+}
+
+fn find_all_possibilities_by_cell(board: [[u8; N]; N]) -> Vec<CellPossibilities> {
+    let mut cells = Vec::new();
+
+    for i in 0..N {
+        for j in 0..N {
+            if board[i][j] == 0 {
+                let mut values = HashSet::new();
+                let cell = Cell { x: i, y: j };
+
+                for number in 0..=9 {
+                    if is_allowed(&board,
+                                  &cell,
+                                  number
+                    ) {
+                        values.insert(number);
+                    }
+                }
+
+                let possibilities = CellPossibilities {
+                    x : i ,
+                    y : j,
+                    possibles_values : values
+                };
+
+                cells.push(
+                    possibilities
+                );
+
+            }
+        }
+    }
+    return cells;
+}
+
+fn find_cell_with_min_options(possibilities : &[CellPossibilities]) -> Option<usize> {
+    let mut min = 9999999;
+    let mut index = None;
+
+
+    for i in 0..possibilities.len()  {
+        let cell = &possibilities[i];
+
+        if !cell.possibles_values.is_empty() && cell.possibles_values.len() < min {
+            min = cell.possibles_values.len();
+            index = Some(i);
+        }
+
+    }
+
+    index
 }
 
 fn start(board: [[u8; N]; N], depth: usize) -> Vec<SudokuGameProperties> {
@@ -38,16 +97,16 @@ fn find_empty_cells(board: &[[u8; N]; N]) -> Vec<Cell> {
     cells
 }
 
-fn new_sudoku_game(board: [[u8; N]; N],
-                   cells_empty : Vec<Cell>,
-current_index : usize) -> SudokuGameProperties {
-
+fn new_sudoku_game(
+    board: [[u8; N]; N],
+    cells_empty: Vec<Cell>,
+    current_index: usize,
+) -> SudokuGameProperties {
     return SudokuGameProperties {
         board,
         cells_empty: cells_empty.clone(),
         current_index: current_index + 1,
-    }
-
+    };
 }
 
 fn solve_recursive(
@@ -56,25 +115,22 @@ fn solve_recursive(
     current_depth: usize,
     queue: &mut Vec<SudokuGameProperties>,
 ) {
-    if current_depth == max_depth || state.current_index >= state.cells_empty.len() {
+    if current_depth == max_depth || state.cells_possibilities.is_empty() {
         queue.push(state);
         return;
     }
 
-    let cell = state.cells_empty[state.current_index];
+    let cell =
 
     for i in 1..=N {
         if (is_allowed(&state.board, &cell, i as u8)) {
-
             let mut new_board = state.board;
             new_board[cell.x][cell.y] = i as u8;
 
-            let new_sudoku_game = new_sudoku_game(new_board,
-                                                  state.cells_empty.clone(),
-                                                  state.current_index);
+            let new_sudoku_game =
+                new_sudoku_game(new_board, state.cells_empty.clone(), state.current_index);
 
-
-            solve_recursive(new_sudoku_game, max_depth, current_depth +1, queue);
+            solve_recursive(new_sudoku_game, max_depth, current_depth + 1, queue);
         }
     }
 }
