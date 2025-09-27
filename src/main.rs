@@ -1,15 +1,16 @@
 use std::collections::{HashSet, VecDeque};
-use std::sync::{mpsc, Arc, Mutex};
-use std::thread;
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Instant;
+use std::{fs, io, thread};
 
 const N: usize = 9;
+const N_ROOT: usize = 3;
 
 #[derive(Clone)]
 struct CellPossibilities {
     x: usize,
     y: usize,
-    possibles_values: HashSet<u8>,
+    possibles_values: HashSet<usize>,
 }
 
 struct Cell {
@@ -19,15 +20,15 @@ struct Cell {
 
 #[derive(Clone)]
 struct SudokuGameProperties {
-    board: [[u8; N]; N],
+    board: [[usize; N]; N],
     cells_possibilities: Vec<CellPossibilities>,
 }
 
 fn reduce(
-    board: &mut [[u8; N]; N],
+    board: &mut [[usize; N]; N],
     possibilities: &mut Vec<CellPossibilities>,
     placed_cell: &Cell,
-    value: u8,
+    value: usize,
 ) {
     board[placed_cell.x][placed_cell.y] = value;
 
@@ -59,15 +60,15 @@ fn affects_cell(placed: &Cell, target: &Cell) -> bool {
         return true;
     }
 
-    let placed_block_x = placed.x / 3;
-    let placed_block_y = placed.y / 3;
-    let target_block_x = target.x / 3;
-    let target_block_y = target.y / 3;
+    let placed_block_x = placed.x / N_ROOT;
+    let placed_block_y = placed.y / N_ROOT;
+    let target_block_x = target.x / N_ROOT;
+    let target_block_y = target.y / N_ROOT;
 
     placed_block_x == target_block_x && placed_block_y == target_block_y
 }
 
-fn find_all_possibilities_by_cell(board: [[u8; N]; N]) -> Vec<CellPossibilities> {
+fn find_all_possibilities_by_cell(board: [[usize; N]; N]) -> Vec<CellPossibilities> {
     let mut cells = Vec::new();
 
     for i in 0..N {
@@ -76,7 +77,7 @@ fn find_all_possibilities_by_cell(board: [[u8; N]; N]) -> Vec<CellPossibilities>
                 let mut values = HashSet::new();
                 let cell = Cell { x: i, y: j };
 
-                for number in 0..=9 {
+                for number in 1..=N {
                     if is_allowed(&board, &cell, number) {
                         values.insert(number);
                     }
@@ -111,9 +112,12 @@ fn find_min_cell(possibilities: &[CellPossibilities]) -> Option<usize> {
     index
 }
 
-fn generate_work(state: SudokuGameProperties, depth: usize,
-                 current: usize,
-                 queue: &mut Vec<SudokuGameProperties>) {
+fn generate_work(
+    state: SudokuGameProperties,
+    depth: usize,
+    current: usize,
+    queue: &mut Vec<SudokuGameProperties>,
+) {
     if current >= depth || state.cells_possibilities.is_empty() {
         queue.push(state);
         return;
@@ -125,23 +129,23 @@ fn generate_work(state: SudokuGameProperties, depth: usize,
         for &value in &cell.possibles_values {
             let mut new_state = state.clone();
 
-            let cell = Cell{
-                x : cell.x,
-                y : cell.y
+            let cell = Cell {
+                x: cell.x,
+                y: cell.y,
             };
 
             reduce(
                 &mut new_state.board,
                 &mut new_state.cells_possibilities,
                 &cell,
-                value
+                value,
             );
             generate_work(new_state, depth, current + 1, queue);
         }
     }
 }
 
-fn solve_state(mut state: SudokuGameProperties) -> Option<[[u8; N]; N]> {
+fn solve_state(mut state: SudokuGameProperties) -> Option<[[usize; N]; N]> {
     if state.cells_possibilities.is_empty() {
         return Some(state.board);
     }
@@ -152,16 +156,16 @@ fn solve_state(mut state: SudokuGameProperties) -> Option<[[u8; N]; N]> {
         for &value in &cell.possibles_values {
             let mut new_state = state.clone();
 
-            let cell = Cell{
-                x : cell.x,
-                y : cell.y
+            let cell = Cell {
+                x: cell.x,
+                y: cell.y,
             };
 
             reduce(
                 &mut new_state.board,
                 &mut new_state.cells_possibilities,
                 &cell,
-                value
+                value,
             );
 
             if let Some(solution) = solve_state(new_state) {
@@ -173,7 +177,7 @@ fn solve_state(mut state: SudokuGameProperties) -> Option<[[u8; N]; N]> {
     None
 }
 
-fn solve_parallel(board: [[u8; N]; N], num_threads: usize) -> Option<[[u8; N]; N]> {
+fn solve_parallel(board: [[usize; N]; N], num_threads: usize) -> Option<[[usize; N]; N]> {
     let cells = find_all_possibilities_by_cell(board);
 
     let initial_state = SudokuGameProperties {
@@ -241,18 +245,15 @@ fn solve_parallel(board: [[u8; N]; N], num_threads: usize) -> Option<[[u8; N]; N
 
     solution.lock().unwrap().clone()
 }
-fn is_in_a_section(board: &[[u8; N]; N], cell: &Cell, num: u8) -> bool {
+fn is_in_a_section(board: &[[usize; N]; N], cell: &Cell, num: usize) -> bool {
     let row = cell.x;
     let col = cell.y;
 
-    let module_row = row % 3;
-    let module_column = col % 3;
+    let start_row = (row / N_ROOT) * N_ROOT;
+    let start_column = (col / N_ROOT) * N_ROOT;
 
-    let start_row = row - module_row;
-    let start_column = col - module_column;
-
-    for n in start_row..(start_row + 3) {
-        for m in start_column..(start_column + 3) {
+    for n in start_row..(start_row + N_ROOT) {
+        for m in start_column..(start_column + N_ROOT) {
             if board[n][m] == num {
                 return true;
             }
@@ -261,7 +262,11 @@ fn is_in_a_section(board: &[[u8; N]; N], cell: &Cell, num: u8) -> bool {
     false
 }
 
-fn is_allowed(board: &[[u8; N]; N], cell: &Cell, num: u8) -> bool {
+fn is_allowed(board: &[[usize; N]; N], cell: &Cell, num: usize) -> bool {
+    if num == 0 {
+        return false;
+    }
+
     let row = cell.x;
     let col = cell.y;
 
@@ -273,25 +278,67 @@ fn is_allowed(board: &[[u8; N]; N], cell: &Cell, num: u8) -> bool {
     !is_in_a_section(board, cell, num)
 }
 
-fn main() {
-    let board: [[u8; N]; N] = [
-        [8, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 3, 6, 0, 0, 0, 0, 0],
-        [0, 7, 0, 0, 9, 0, 2, 0, 0],
-        [0, 5, 0, 0, 0, 7, 0, 0, 0],
-        [0, 0, 0, 0, 4, 5, 7, 0, 0],
-        [0, 0, 0, 1, 0, 0, 0, 3, 0],
-        [0, 0, 1, 0, 0, 0, 0, 6, 8],
-        [0, 0, 8, 5, 0, 0, 0, 1, 0],
-        [0, 9, 0, 0, 0, 0, 4, 0, 0],
-    ];
+fn load_sudoku_from_file(filename: &str) -> io::Result<[[usize; N]; N]> {
+    let content = fs::read_to_string(filename)?;
+    let mut board = [[0; N]; N];
+    let mut row_index = 0;
 
-    let num_threads = thread::available_parallelism().map(|p| p.get()).unwrap_or(4);
+    for line in content.lines() {
+        if row_index >= N {
+            break;
+        }
+
+        let mut numbers = Vec::new();
+        for word in line.split_whitespace() {
+            numbers.push(word);
+        }
+
+        let mut col_index = 0;
+        for num_str in numbers {
+            if row_index >= N {
+                break;
+            }
+
+            match num_str.parse::<usize>() {
+                Ok(num) => {
+                    if num <= N {
+                        board[row_index][col_index] = num;
+                    }
+                }
+                Err(_) => {
+                    board[row_index][col_index] = 0;
+                }
+            }
+            col_index += 1;
+        }
+        row_index += 1;
+    }
+
+    Ok(board)
+}
+fn main() {
+    let board = match load_sudoku_from_file("sudoku_file_matrix.txt") {
+        Ok(loaded_board) => {
+            println!("Sudoku cargado desde archivo");
+            loaded_board
+        }
+        Err(e) => {
+            eprintln!("Error al cargar archivo: {}", e);
+            return; // O usar un sudoku por defecto
+        }
+    };
+
+    let num_threads = thread::available_parallelism()
+        .map(|p| p.get())
+        .unwrap_or(4);
 
     let start = Instant::now();
     if let Some(solution) = solve_parallel(board, num_threads) {
         let duration = start.elapsed();
-        println!("Solución encontrada en {:?} con {} threads", duration, num_threads);
+        println!(
+            "Solución encontrada en {:?} con {} threads",
+            duration, num_threads
+        );
 
         for row in solution {
             println!("{:?}", row);
