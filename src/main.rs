@@ -1,5 +1,7 @@
-use std::collections::HashSet;
-use std::mem::needs_drop;
+use std::collections::{HashSet, VecDeque};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
+use std::time::Instant;
 
 const N: usize = 9;
 
@@ -21,6 +23,50 @@ struct SudokuGameProperties {
     cells_possibilities: Vec<CellPossibilities>,
 }
 
+fn reduce(
+    board: &mut [[u8; N]; N],
+    possibilities: &mut Vec<CellPossibilities>,
+    placed_cell: &Cell,
+    value: u8,
+) {
+    board[placed_cell.x][placed_cell.y] = value;
+
+    let mut i = 0;
+    while i < possibilities.len() {
+        let cell = &possibilities[i];
+        if cell.x == placed_cell.x && cell.y == placed_cell.y {
+            possibilities.remove(i);
+        } else {
+            i += 1;
+        }
+    }
+
+    for i in 0..possibilities.len() {
+        let cell = &mut possibilities[i];
+        let target_cell = Cell {
+            x: cell.x,
+            y: cell.y,
+        };
+
+        if affects_cell(placed_cell, &target_cell) {
+            cell.possibles_values.remove(&value);
+        }
+    }
+}
+
+fn affects_cell(placed: &Cell, target: &Cell) -> bool {
+    if placed.x == target.x || placed.y == target.y {
+        return true;
+    }
+
+    let placed_block_x = placed.x / 3;
+    let placed_block_y = placed.y / 3;
+    let target_block_x = target.x / 3;
+    let target_block_y = target.y / 3;
+
+    placed_block_x == target_block_x && placed_block_y == target_block_y
+}
+
 fn find_all_possibilities_by_cell(board: [[u8; N]; N]) -> Vec<CellPossibilities> {
     let mut cells = Vec::new();
 
@@ -31,130 +77,170 @@ fn find_all_possibilities_by_cell(board: [[u8; N]; N]) -> Vec<CellPossibilities>
                 let cell = Cell { x: i, y: j };
 
                 for number in 0..=9 {
-                    if is_allowed(&board,
-                                  &cell,
-                                  number
-                    ) {
+                    if is_allowed(&board, &cell, number) {
                         values.insert(number);
                     }
                 }
 
                 let possibilities = CellPossibilities {
-                    x : i ,
-                    y : j,
-                    possibles_values : values
+                    x: i,
+                    y: j,
+                    possibles_values: values,
                 };
 
-                cells.push(
-                    possibilities
-                );
-
+                cells.push(possibilities);
             }
         }
     }
     return cells;
 }
 
-fn find_cell_with_min_options(possibilities : &[CellPossibilities]) -> Option<usize> {
+fn find_min_cell(possibilities: &[CellPossibilities]) -> Option<usize> {
     let mut min = 9999999;
     let mut index = None;
 
-
-    for i in 0..possibilities.len()  {
+    for i in 0..possibilities.len() {
         let cell = &possibilities[i];
 
         if !cell.possibles_values.is_empty() && cell.possibles_values.len() < min {
             min = cell.possibles_values.len();
             index = Some(i);
         }
-
     }
 
     index
 }
 
-fn start(board: [[u8; N]; N], depth: usize) -> Vec<SudokuGameProperties> {
-    let mut queue = Vec::new();
-    let cells_empty = find_empty_cells(&board);
-
-    let state = SudokuGameProperties {
-        board,
-        cells_empty,
-        current_index: 0,
-    };
-}
-
-fn find_empty_cells(board: &[[u8; N]; N]) -> Vec<Cell> {
-    let mut cells = Vec::new();
-
-    for i in 0..N {
-        for j in 0..N {
-            if board[i][j] == 0 {
-                cells.push(Cell { x: i, y: j });
-            }
-        }
-    }
-    cells
-}
-
-fn new_sudoku_game(
-    board: [[u8; N]; N],
-    cells_empty: Vec<Cell>,
-    current_index: usize,
-) -> SudokuGameProperties {
-    return SudokuGameProperties {
-        board,
-        cells_empty: cells_empty.clone(),
-        current_index: current_index + 1,
-    };
-}
-
-fn solve_recursive(
-    state: SudokuGameProperties,
-    max_depth: usize,
-    current_depth: usize,
-    queue: &mut Vec<SudokuGameProperties>,
-) {
-    if current_depth == max_depth || state.cells_possibilities.is_empty() {
+fn generate_work(state: SudokuGameProperties, depth: usize,
+                 current: usize,
+                 queue: &mut Vec<SudokuGameProperties>) {
+    if current >= depth || state.cells_possibilities.is_empty() {
         queue.push(state);
         return;
     }
 
-    let cell =
+    if let Some(best_index) = find_min_cell(&state.cells_possibilities) {
+        let cell = state.cells_possibilities[best_index].clone();
 
-    for i in 1..=N {
-        if (is_allowed(&state.board, &cell, i as u8)) {
-            let mut new_board = state.board;
-            new_board[cell.x][cell.y] = i as u8;
+        for &value in &cell.possibles_values {
+            let mut new_state = state.clone();
 
-            let new_sudoku_game =
-                new_sudoku_game(new_board, state.cells_empty.clone(), state.current_index);
+            let cell = Cell{
+                x : cell.x,
+                y : cell.y
+            };
 
-            solve_recursive(new_sudoku_game, max_depth, current_depth + 1, queue);
+            reduce(
+                &mut new_state.board,
+                &mut new_state.cells_possibilities,
+                &cell,
+                value
+            );
+            generate_work(new_state, depth, current + 1, queue);
         }
     }
 }
 
-fn solve(board: &mut [[u8; N]; N], cells_empty: &mut Vec<Cell>, index: usize) -> bool {
-    if index == cells_empty.len() {
-        return true;
+fn solve_state(mut state: SudokuGameProperties) -> Option<[[u8; N]; N]> {
+    if state.cells_possibilities.is_empty() {
+        return Some(state.board);
     }
 
-    let cell = cells_empty[index];
+    if let Some(best_index) = find_min_cell(&state.cells_possibilities) {
+        let cell = state.cells_possibilities[best_index].clone();
 
-    for i in 1..=N {
-        if (is_allowed(board, &cell, i as u8)) {
-            board[cell.x][cell.y] = i as u8;
-            if (solve(board, cells_empty, index + 1)) {
-                return true;
+        for &value in &cell.possibles_values {
+            let mut new_state = state.clone();
+
+            let cell = Cell{
+                x : cell.x,
+                y : cell.y
+            };
+
+            reduce(
+                &mut new_state.board,
+                &mut new_state.cells_possibilities,
+                &cell,
+                value
+            );
+
+            if let Some(solution) = solve_state(new_state) {
+                return Some(solution);
             }
-            board[cell.x][cell.y] = 0;
         }
     }
 
-    false
+    None
 }
 
+fn solve_parallel(board: [[u8; N]; N], num_threads: usize) -> Option<[[u8; N]; N]> {
+    let cells = find_all_possibilities_by_cell(board);
+
+    let initial_state = SudokuGameProperties {
+        board,
+        cells_possibilities: cells,
+    };
+
+    let mut work_queue = Vec::new();
+    generate_work(initial_state, 3, 0, &mut work_queue);
+
+    if work_queue.is_empty() {
+        return None;
+    }
+
+    let queue = Arc::new(Mutex::new(VecDeque::from(work_queue)));
+    let solution = Arc::new(Mutex::new(None));
+    let stop_flag = Arc::new(Mutex::new(false));
+    let (tx, rx) = mpsc::channel();
+
+    let mut handles = Vec::new();
+    for thread_id in 0..num_threads {
+        let queue_clone = queue.clone();
+        let solution_clone = solution.clone();
+        let stop_clone = stop_flag.clone();
+        let tx_clone = tx.clone();
+
+        let handle = thread::spawn(move || {
+            loop {
+                if *stop_clone.lock().unwrap() {
+                    break;
+                }
+
+                let work = {
+                    let mut q = queue_clone.lock().unwrap();
+                    q.pop_front()
+                };
+
+                match work {
+                    Some(state) => {
+                        if let Some(result) = solve_state(state) {
+                            *solution_clone.lock().unwrap() = Some(result);
+                            *stop_clone.lock().unwrap() = true;
+                            tx_clone.send(thread_id).unwrap();
+                            break;
+                        }
+                    }
+                    None => {
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                    }
+                }
+            }
+        });
+        handles.push(handle);
+    }
+
+    drop(tx);
+
+    if rx.recv().is_ok() {
+        *stop_flag.lock().unwrap() = true;
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    solution.lock().unwrap().clone()
+}
 fn is_in_a_section(board: &[[u8; N]; N], cell: &Cell, num: u8) -> bool {
     let row = cell.x;
     let col = cell.y;
@@ -189,14 +275,28 @@ fn is_allowed(board: &[[u8; N]; N], cell: &Cell, num: u8) -> bool {
 
 fn main() {
     let board: [[u8; N]; N] = [
-        [1, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [8, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 3, 6, 0, 0, 0, 0, 0],
+        [0, 7, 0, 0, 9, 0, 2, 0, 0],
+        [0, 5, 0, 0, 0, 7, 0, 0, 0],
+        [0, 0, 0, 0, 4, 5, 7, 0, 0],
+        [0, 0, 0, 1, 0, 0, 0, 3, 0],
+        [0, 0, 1, 0, 0, 0, 0, 6, 8],
+        [0, 0, 8, 5, 0, 0, 0, 1, 0],
+        [0, 9, 0, 0, 0, 0, 4, 0, 0],
     ];
+
+    let num_threads = thread::available_parallelism().map(|p| p.get()).unwrap_or(4);
+
+    let start = Instant::now();
+    if let Some(solution) = solve_parallel(board, num_threads) {
+        let duration = start.elapsed();
+        println!("Solución encontrada en {:?} con {} threads", duration, num_threads);
+
+        for row in solution {
+            println!("{:?}", row);
+        }
+    } else {
+        println!("No se encontró solución");
+    }
 }
