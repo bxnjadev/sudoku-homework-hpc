@@ -6,6 +6,10 @@ use std::{fs, io, thread};
 const N: usize = 9;
 const N_ROOT: usize = 3;
 
+
+/// Esta estructura representa todas los valores
+/// posibles para una celda del juego del sudoku
+
 #[derive(Clone)]
 struct CellPossibilities {
     x: usize,
@@ -13,16 +17,26 @@ struct CellPossibilities {
     possibles_values: HashSet<usize>,
 }
 
+/// Esta estructura representa una celda del sudoku
+
 struct Cell {
     x: usize,
     y: usize,
 }
+
+/// Esta estructura representa un estado del juego del sudoku
+/// el cual tiene su tablero y las celdas posibles para
+/// establecer valores
 
 #[derive(Clone)]
 struct SudokuGameProperties {
     board: [[usize; N]; N],
     cells_possibilities: Vec<CellPossibilities>,
 }
+
+/// Esta función elimina los valores posibles
+/// detectados por la estrategia de heuristica
+/// en una celda posible para ser posicionada
 
 fn reduce(
     board: &mut [[usize; N]; N],
@@ -55,6 +69,8 @@ fn reduce(
     }
 }
 
+/// Verifica si al colocar una celda afecta a otra celda
+/// debido a las reglas establecidas por el sudoku
 fn affects_cell(placed: &Cell, target: &Cell) -> bool {
     if placed.x == target.x || placed.y == target.y {
         return true;
@@ -68,6 +84,9 @@ fn affects_cell(placed: &Cell, target: &Cell) -> bool {
     placed_block_x == target_block_x && placed_block_y == target_block_y
 }
 
+/// Está función busca en todo la grilla todos los valores posible para
+/// una celda en especifico y los agrega
+/// esto es útil para luego realiza el algoritmo de heurística
 fn find_all_possibilities_by_cell(board: [[usize; N]; N]) -> Vec<CellPossibilities> {
     let mut cells = Vec::new();
 
@@ -96,6 +115,10 @@ fn find_all_possibilities_by_cell(board: [[usize; N]; N]) -> Vec<CellPossibiliti
     return cells;
 }
 
+/// Esta función encuentra una celda utilizando la estrateia de la heurística de valores
+/// la cual busca la celda con menor números de valores posible
+/// esta estrategia se aborda del paper "Efficient Parallel Sudoku Solver via Thread Management & Data
+//  Sharing Method"
 fn find_min_cell(possibilities: &[CellPossibilities]) -> Option<usize> {
     let mut min = 9999999;
     let mut index = None;
@@ -111,6 +134,11 @@ fn find_min_cell(possibilities: &[CellPossibilities]) -> Option<usize> {
 
     index
 }
+
+/// Está función genera subtareas para resolver el sudoku
+/// mediante backtraking, esto permite generar diferentes
+/// estados para ser agregado a una cola para luego
+/// ser procesado por los hilos
 
 fn generate_work(
     state: SudokuGameProperties,
@@ -145,6 +173,9 @@ fn generate_work(
     }
 }
 
+/// Resuelve un estado actual del suoku y utilizando técnicas
+/// de backtracking pruebas las soluciones para ser resuelto
+
 fn solve_state(mut state: SudokuGameProperties) -> Option<[[usize; N]; N]> {
     if state.cells_possibilities.is_empty() {
         return Some(state.board);
@@ -176,6 +207,10 @@ fn solve_state(mut state: SudokuGameProperties) -> Option<[[usize; N]; N]> {
 
     None
 }
+
+/// Esta función resuelve el sudoku mediante un esquema paralelo, utilizando hilos
+/// los hilos se dividen el trabajo de búsqueda
+/// para ejecutar la función se solicita la grilla y el número de hilos
 
 fn solve_parallel(board: [[usize; N]; N], num_threads: usize) -> Option<[[usize; N]; N]> {
     let cells = find_all_possibilities_by_cell(board);
@@ -245,6 +280,11 @@ fn solve_parallel(board: [[usize; N]; N], num_threads: usize) -> Option<[[usize;
 
     solution.lock().unwrap().clone()
 }
+
+/// Esta función verifica si en una subgrilla
+/// se puede ingresar un cierto valor
+/// para eso se necesita la grilla, celda y el valor
+/// se devuelve true si es posible o de lo contrario false
 fn is_in_a_section(board: &[[usize; N]; N], cell: &Cell, num: usize) -> bool {
     let row = cell.x;
     let col = cell.y;
@@ -262,6 +302,13 @@ fn is_in_a_section(board: &[[usize; N]; N], cell: &Cell, num: usize) -> bool {
     false
 }
 
+/// Esta función permite buscar si es posible
+/// dejar un elemento en un valor especifico
+/// para ello verifica si es los valores
+/// de la subgrilla y en la fila y columna que
+/// se encuentra, para eso se solicita la grilla,
+/// celda y el valor a posicionar
+
 fn is_allowed(board: &[[usize; N]; N], cell: &Cell, num: usize) -> bool {
     if num == 0 {
         return false;
@@ -277,6 +324,10 @@ fn is_allowed(board: &[[usize; N]; N], cell: &Cell, num: usize) -> bool {
     }
     !is_in_a_section(board, cell, num)
 }
+
+/// Está función permite cargar una matriz desde un archivo mediante
+/// operaciones de lectura de un archivo
+/// devuelve la matriz envuelta en un Result para evitar fallos
 
 fn load_sudoku_from_file(filename: &str) -> io::Result<[[usize; N]; N]> {
     let content = fs::read_to_string(filename)?;
@@ -316,6 +367,12 @@ fn load_sudoku_from_file(filename: &str) -> io::Result<[[usize; N]; N]> {
 
     Ok(board)
 }
+
+
+///
+/// Función principal del programa, lee el archivo y lanza el análisis de la
+/// resolución del sudoku para todos los hilos
+
 fn main() {
     let board = match load_sudoku_from_file("sudoku_file_matrix.txt") {
         Ok(loaded_board) => {
@@ -324,7 +381,7 @@ fn main() {
         }
         Err(e) => {
             eprintln!("Error al cargar archivo: {}", e);
-            return; // O usar un sudoku por defecto
+            return;
         }
     };
 
@@ -348,7 +405,7 @@ fn main() {
                 let efficiency = speedup / num_threads as f64;
 
                 println!("Tiempo con {} hilos: {:?}", num_threads, elapsed_parallel);
-                println!("Speedup: {}", speedup);
+                println!("Speedup (Aceleración): {}", speedup);
                 println!("Eficiencia: {}", efficiency);
                 println!()
             }
