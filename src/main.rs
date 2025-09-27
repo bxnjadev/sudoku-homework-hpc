@@ -328,22 +328,30 @@ fn main() {
         }
     };
 
-    let num_threads = thread::available_parallelism()
+    let num_threads_max = thread::available_parallelism()
         .map(|p| p.get())
         .unwrap_or(4);
 
-    let start = Instant::now();
-    if let Some(solution) = solve_parallel(board, num_threads) {
-        let duration = start.elapsed();
-        println!(
-            "Solución encontrada en {:?} con {} threads",
-            duration, num_threads
-        );
+    let start_single = Instant::now();
+    if let Some(solution_single) = solve_state(SudokuGameProperties {
+        board,
+        cells_possibilities: find_all_possibilities_by_cell(board),
+    }) {
+        let elapsed_single = start_single.elapsed();
+        println!("Tiempo con un solo hilo: {:?}", elapsed_single);
 
-        for row in solution {
-            println!("{:?}", row);
+        for num_threads in 1..=num_threads_max {
+            let start_parallel = Instant::now();
+            if let Some(solution_parallel) = solve_parallel(board, num_threads) {
+                let elapsed_parallel = start_parallel.elapsed();
+                let speedup = elapsed_single.as_secs_f64() / elapsed_parallel.as_secs_f64();
+                let efficiency = speedup / num_threads as f64;
+
+                println!("Tiempo con {} hilos: {:?}", num_threads, elapsed_parallel);
+                println!("Speedup: {}", speedup);
+                println!("Eficiencia: {}", efficiency);
+                println!()
+            }
         }
-    } else {
-        println!("No se encontró solución");
     }
 }
